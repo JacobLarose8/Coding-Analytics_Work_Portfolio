@@ -1,0 +1,297 @@
+---
+title: "Final Project File"
+format: docx
+editor: visual
+---
+
+## 1. Required Packages
+
+Insert Text
+
+```{r}
+library(tidyverse)
+library(baseballr)
+library(xgboost)
+library(Lahman)
+library(pROC)
+library(dplyr)
+library(caret)
+```
+
+#### All Data
+```{r}
+team_batting <- baseballr::fg_team_batter(startseason = 2023, endseason = 2004, ind = 1)%>%
+  select(team_name, Season, WAR, K_pct, wOBA, BABIP, SB, Clutch)
+team_batting$team_name <- gsub("ANA", "LAA", team_batting$team_name)
+team_batting$team_name <- gsub("FLA", "MIA", team_batting$team_name)
+team_batting$team_name <- gsub("MON", "WSN", team_batting$team_name)
+team_batting$team_name <- gsub("TBD", "TBR", team_batting$team_name)
+
+
+team_fielding <- baseballr::fg_team_fielder(startseason = 2023, endseason = 2004, ind = 1)%>%
+  select(team_name, Season, Defense, RngR)
+
+get_abbreviation <- function(team_name) {
+  abbreviations <- c("Angels" = "LAA", "Astros" = "HOU", "Athletics" = "OAK", "Blue Jays" = "TOR", "Braves" = "ATL", "Brewers" = "MIL", "Cardinals" = "STL", "Cubs" = "CHC", "Diamondbacks" = "ARI", "Dodgers" = "LAD", "Giants" = "SFG", "Guardians" = "CLE", "Indians" = "CLE", "Mariners" = "SEA", "Marlins" = "MIA", "Mets" = "NYM", "Nationals" = "WSN", "Orioles" = "BAL", "Padres" = "SDP", "Phillies" = "PHI", "Pirates" = "PIT", "Rangers" = "TEX", "Rays" = "TBR", "Red Sox" = "BOS", "Reds" = "CIN", "Rockies" = "COL", "Royals" = "KCR", "Tigers" = "DET", "Twins" = "MIN", "White Sox" = "CHW", "Yankees" = "NYY", "Devil Rays" = "TBR", "Expos" = "WSN", "MON" = "WSN", "FLA" = "MIA", "ANA" = "LAA", "TBD" = "TBR" )
+  return(abbreviations[team_name])
+}
+
+# Create a new column with team abbreviations
+team_fielding$team_abbr <- sapply(team_fielding$team_name, get_abbreviation)
+# Assuming your data frame is named df and the column is named column_name
+
+
+
+team_pitching <- baseballr::fg_team_pitcher(startseason = 2023, endseason = 2004, ind = 1)%>%
+  select(team_name, Season, ERA, WAR, BB_9, Clutch, MD)
+team_pitching$team_name <- gsub("ANA", "LAA", team_pitching$team_name)
+team_pitching$team_name <- gsub("FLA", "MIA", team_pitching$team_name)
+team_pitching$team_name <- gsub("MON", "WSN", team_pitching$team_name)
+team_pitching$team_name <- gsub("TBD", "TBR", team_pitching$team_name)
+
+
+team_info <- team_batting %>%
+  left_join(team_pitching, by = c("team_name" = "team_name", "Season" = "Season"))
+
+team_info <- team_info %>%
+  left_join(team_fielding, by = c("team_name" = "team_abbr", "Season" = "Season"))
+
+
+ws_winner_table <- SeriesPost %>%
+  filter(yearID >= "2004") %>%
+  filter(round == "ALCS" | round == "NLCS") %>%
+  select(teamIDwinner, yearID) %>%
+  arrange(-yearID) %>%
+  mutate(is_winner = 1)
+ws_winner_table
+ws_winner_table$teamIDwinner <- gsub("SLN", "STL", ws_winner_table$teamIDwinner)
+ws_winner_table$teamIDwinner <- gsub("CHA", "CHW", ws_winner_table$teamIDwinner)
+ws_winner_table$teamIDwinner <- gsub("TBA", "TBR", ws_winner_table$teamIDwinner)
+ws_winner_table$teamIDwinner <- gsub("NYA", "NYY", ws_winner_table$teamIDwinner)
+ws_winner_table$teamIDwinner <- gsub("SFN", "SFG", ws_winner_table$teamIDwinner)
+ws_winner_table$teamIDwinner <- gsub("KCA", "KCR", ws_winner_table$teamIDwinner)
+ws_winner_table$teamIDwinner <- gsub("NYN", "NYM", ws_winner_table$teamIDwinner)
+ws_winner_table$teamIDwinner <- gsub("CHN", "CHC", ws_winner_table$teamIDwinner)
+ws_winner_table$teamIDwinner <- gsub("LAN", "LAD", ws_winner_table$teamIDwinner)
+ws_winner_table$teamIDwinner <- gsub("WAS", "WSN", ws_winner_table$teamIDwinner)
+
+missing_data <- data.frame(
+  teamIDwinner = c("TEX", "ARI"),  
+  yearID = c(2023, 2023),    
+  is_winner = 1                     
+)
+
+ws_winner_table <- bind_rows(ws_winner_table, missing_data)
+
+
+WSData <- team_info %>%
+  left_join(ws_winner_table, by = c("team_name" = "teamIDwinner", "Season" = "yearID"))
+
+WSData$is_winner[is.na(WSData$is_winner)] <- 0
+
+
+WSData <- WSData %>%
+  mutate(row_id = row_number())
+
+
+```
+
+
+###### Model
+```{r}
+# Remove columns "column1" and "column2"
+WSData.m <- WSData[, !colnames(WSData) %in% c("team_name", "team_name.y")]
+
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Sample row indices for training data
+train_indices <- sample(nrow(WSData.m), 0.7 * nrow(WSData.m))
+
+# Create training and test datasets
+WSTrain <- WSData.m[train_indices, ]
+WSTest <- WSData.m[-train_indices, ]
+WSTest <- WSTest[, !colnames(WSTest) %in% c("is_winner")]
+```
+
+```{r}
+features <- WSData.m[, !names(WSData.m) %in% c("is_winner", "row_id", "Season")]
+target <- WSData.m$is_winner
+
+# Train the model using only the features
+WSTrain <- xgb.DMatrix(data = as.matrix(features[sapply(features, is.numeric)]), label = target)
+
+# Step 3: Train the XGBoost model
+# Parameters
+params <- list(
+  objective = "binary:logistic",
+  eta = 0.1,
+  max_depth = 5,
+  gamma = .5,
+  subsample = 0.7,
+  colsample_bytree = 0.7
+)
+
+model <- xgboost(params = params, data = WSTrain, nrounds = 35)
+
+# Step 4: Make predictions
+# Assuming your test data is stored in a data frame called 'test_data'
+WSTest <- xgb.DMatrix(data = as.matrix(features[sapply(features, is.numeric)]))
+predictions <- predict(model, WSTest)
+binary_predictions <- ifelse(predictions >= 0.3, 1, 0)
+# Assuming your test data is stored in a data frame called 'test_data'
+# Assuming WSData.m has an identifier column 'id' (replace 'id' with your actual identifier column name)
+
+#### SEE MODEL
+prediction_df <- data.frame(id = WSData.m$row_id, predictions = binary_predictions, prob = predictions)
+
+final_model <- prediction_df %>%
+  left_join(WSData, by = c("id" = "row_id"))
+
+importance_scores <- xgb.importance(model = model)
+
+print(importance_scores)
+
+final_chopped <- final_model %>%
+  arrange(-is_winner, -Season, -prob) %>%
+  head(40)
+
+# Calculate misclassification rate
+misclassification_rate <- mean(binary_predictions != WSData.m$is_winner)
+cat("Misclassification Rate:", misclassification_rate, "\n")
+
+
+
+# Step 5: Evaluate the model
+# Example evaluation for binary classification
+# Assuming true labels are stored in a vector called 'true_labels'
+true_labels <- WSData$is_winner
+
+auc <- auc(true_labels, predictions)
+
+print(auc)
+# Plot ROC curve
+library(pROC)
+roc_curve <- roc(true_labels, predictions)
+plot(roc_curve, main = "ROC Curve")
+
+
+```
+
+```{r}
+# Check correlation
+correlation_matrix <- cor(WSData.m[, sapply(WSData.m, is.numeric)])
+
+# Visualize the correlation matrix using a heatmap
+library(ggplot2)
+library(reshape2)  # For data manipulation
+
+# Convert the correlation matrix to a long format for plotting
+correlation_long <- melt(correlation_matrix)
+
+
+```
+#Visualization
+```{r}
+final_chopped$is_winner <- factor(final_chopped$is_winner)
+
+
+library(ggplot2)
+
+ggplot(data = final_chopped, aes(x = -Season, fill = factor(predictions))) +
+  geom_bar(position = "stack", color = "black") +
+  scale_fill_manual(values = c("0" = "red", "1" = "green")) +
+  xlab("Season") +
+  ylab("Two League Champions") +
+  guides(fill = guide_legend(title = "Predictions"))+
+  theme_minimal()
+
+```
+
+
+```{r}
+#Confusion Matrix
+library(caret)
+library(ggplot2)
+
+conf_matrix <- confusionMatrix(factor(binary_predictions), factor(WSData.m$is_winner))
+
+conf_matrix_data <- as.data.frame(conf_matrix$table)
+colnames(conf_matrix_data) <- c("Predicted", "Actual", "Count")
+
+ggplot(data = conf_matrix_data, aes(x = Actual, y = Predicted, fill = Count)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Count), vjust = 1) +
+  scale_fill_gradient(low = "lightblue", high = "yellow") +
+  labs(title = "Confusion Matrix",
+       x = "Actual",
+       y = "Predicted") +
+  theme_minimal()
+
+```
+
+```{r}
+library(ggrepel)
+
+ggplot(data = importance_scores, aes(x = Gain, y = Frequency, label = Feature)) +
+  geom_hline(yintercept = mean(importance_scores$Frequency), 
+             linewidth = 0.8, 
+             color = "black", 
+             linetype = "dashed") +
+  geom_vline(xintercept = mean(importance_scores$Gain), 
+             linewidth = 0.8, 
+             color = "black", 
+             linetype = "dashed") +
+  geom_point(aes(fill = Gain)) +  # Mapping fill to Gain here
+  geom_text_repel(size = 3, 
+                  box.padding = 0.5,  
+                  max.overlaps = Inf, 
+                  force = 1) +        
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 6),
+                     labels = scales::label_comma()) +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 6),
+                     labels = scales::label_comma()) +
+  scale_fill_gradient(low = "yellow", high = "green") +  # Gradient from yellow to green
+  labs(title = "Gain Versus Frequency per Feature",
+       subtitle = "Importance Scores",
+       x = "Gain",
+       y = "Frequency") +
+  theme_minimal()
+
+
+
+
+```
+```{r}
+ggplot(data = importance_scores, aes(x = Gain, y = Frequency, label = Feature, color = Gain)) +
+  geom_hline(yintercept = mean(importance_scores$Frequency), 
+             linewidth = 0.8, 
+             color = "black", 
+             linetype = "dashed") +
+  geom_vline(xintercept = mean(importance_scores$Gain), 
+             linewidth = 0.8, 
+             color = "black", 
+             linetype = "dashed") +
+  geom_point(size = 5, color = "black") + # Larger points for outline
+  geom_point(size = 3) + # Smaller filled points on top
+  geom_text_repel(aes(color = NULL), # Remove color aesthetic for text labels
+                  size = 4, 
+                  box.padding = 0.5,  
+                  max.overlaps = Inf, 
+                  force = 1) +        
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 6),
+                     labels = scales::label_comma()) +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 6),
+                     labels = scales::label_comma()) +
+  scale_color_gradient(low = "yellow", high = "green") +
+  labs(title = "Gain Versus Frequency per Feature",
+       subtitle = "Importance Scores",
+       x = "Gain",
+       y = "Frequency",
+       color = "Gain") +
+  theme_minimal()
+
+
+```
+
