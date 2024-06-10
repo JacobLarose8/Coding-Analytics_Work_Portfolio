@@ -1,0 +1,237 @@
+---
+title: "Homework 3 JL"
+format: html
+editor: visual
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Running Code
+
+When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+
+```{r}
+1 + 1
+```
+
+You can add options to executable code like this
+
+```{r}
+#| echo: false
+2 * 2
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).
+
+```{r}
+library(tidyverse)
+library(nflverse)
+library(vroom)
+library(ggrepel)
+library(ggtext)
+library(ggimage)
+library(ggfx)
+library(ggridges)
+```
+
+```{r}
+Jacob_theme <- function(..., base_size = 12) {
+  
+    theme(
+      text = element_text(family = "Arial", size = base_size),
+      axis.ticks = element_blank(),
+      axis.title = element_text(color = "black",
+                                face = "bold"),
+      axis.text = element_text(color = "black",
+                               face = "bold"),
+      plot.title.position = "plot",
+      plot.title = element_text(size = 16,
+                                face = "bold",
+                                color = "black",
+                                vjust = .02,
+                                hjust = 0.5),
+      plot.subtitle = element_text(color = "black",
+                                   hjust = 0.5),
+      plot.caption = element_text(size = 8,
+                                  face = "italic",
+                                  color = "black"),
+      panel.grid.minor = element_blank(),
+      panel.grid.major =  element_line(color = "#d0d0d0"),
+      panel.background = element_rect(fill = "#f7f7f7"),
+      plot.background = element_rect(fill = "#f7f7f7"),
+      panel.border = element_blank())
+}
+```
+
+Question 1
+
+```{r}
+pass_epa_first <- nflreadr::load_pbp(seasons = 2023) %>%
+  group_by(posteam) %>%
+  filter(season_type == "REG")%>%
+  filter(down == 1)%>%
+  summarize(first_down_epa = sum(qb_epa, na.rm = T))
+
+
+pass_epa_fourth <- nflreadr::load_pbp(seasons = 2023) %>%
+  group_by(posteam) %>%
+  filter(season_type == "REG")%>%
+  filter(down == 4)%>%
+  summarize(fourth_down_epa = sum(qb_epa, na.rm = T))
+
+pass_epa_down <- pass_epa_first %>%
+  left_join(pass_epa_fourth, by = c("posteam" = "posteam"))
+
+tot_epa <- nflreadr::load_pbp(seasons = 2023) %>%
+  group_by(posteam) %>%
+  filter(season_type == "REG")%>%
+  filter(play_type == "pass" | play_type == "run")%>%
+  summarize(tot_epa = sum(epa, na.rm = T))
+
+
+pass_epa_down <- pass_epa_down %>%
+  left_join(teams_colors_logos, by = c("posteam" = "team_abbr"))
+
+pass_epa_down <- pass_epa_down %>%
+  left_join(tot_epa, by = c("posteam" = "posteam"))
+
+pass_epa_down
+
+
+  
+```
+
+```{r}
+ggplot(data = pass_epa_down, aes(x = fourth_down_epa , y = first_down_epa)) +
+  geom_hline(yintercept = mean(pass_epa_down$tot_epa), 
+             linewidth = 0.8, 
+             color = "black", 
+             linetype = "dashed") +
+  geom_vline(xintercept = mean(pass_epa_down$tot_epa), 
+             linewidth = 0.8, 
+             color = "black", 
+             linetype = "dashed") +
+  geom_image(aes(image = team_logo_wikipedia), asp = 16/9) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 6),
+                     labels = scales::label_comma()) +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 6),
+                     labels = scales::label_comma()) +
+  labs(title = "**2023 Team 1st Down vs 4th Down Pass EPA**",
+       subtitle = "2023 NFL Regular Season",
+       caption = "*Question 1*
+       *Dashed lines are average run or pass epa league wide*
+       **Jacob Larose**",
+       x = "Fourth Down EPA",
+       y = "First Down EPA") +
+  Jacob_theme()
+```
+
+Question 2
+
+```{r}
+pass_pct <- nflreadr::load_pbp(seasons = 2010:2023) %>%
+  group_by(season) %>%
+  filter(season_type == "REG")%>%
+  filter(play_type == "pass" | play_type == "run")%>%
+  summarize(tot_pass = sum(play_type == "pass", na.rm = T),
+            tot_run = sum(play_type == "run", na.rm = T),
+            tot_plays = sum(tot_pass + tot_run),
+            pass_pct = sum(tot_pass / tot_plays))
+```
+
+```{r}
+ggplot(pass_pct, aes(x = season, y = pass_pct)) +
+  geom_line(size = 2, color = "#013369") +
+  geom_point(size = 5, color = "#D50A0A") +
+  Jacob_theme() +
+  scale_x_continuous(breaks = seq(2010, 2023, 2)) +
+  scale_y_continuous(breaks = scales::pretty_breaks(),
+                     labels = scales::percent_format()) +
+  Jacob_theme() +
+  theme(legend.position = "none") +
+  xlab("Season") +
+  ylab("Pass Percentage") +
+  labs(title = "**NFL Pass Play Percentage by Season**",
+       subtitle = "*2010 - 2023: Regular Season*",
+       caption = "*Quesion 2*<br>
+       **Jacob Larose**")
+```
+
+Question 3
+
+```{r}
+bills_epa <- nflreadr::load_pbp(seasons = 2023) %>%
+  filter(posteam == "BUF")%>%
+  group_by(week, defteam, posteam) %>%
+  filter(season_type == "REG")%>%
+  summarize(tot_week_epa = sum(epa, na.rm = T))
+
+bills_epa <- bills_epa %>%
+  left_join(teams_colors_logos, by = c("defteam" = "team_abbr"))
+
+bills_epa
+```
+
+```{r}
+ggplot(data = bills_epa, aes(x = week, y = tot_week_epa)) +
+  geom_smooth(se = FALSE, color = "black", linetype = "dashed") +
+  geom_area(fill = "#00338D", alpha = 0.4) +
+  geom_line(color = "#C60C30", size = 1.5) +
+  geom_image(aes(image = team_logo_wikipedia), size = 0.045, asp = 16/9) +
+  scale_x_continuous(breaks = seq(1,18,1)) +
+  scale_y_continuous(breaks = scales::pretty_breaks()) +
+  Jacob_theme() +
+  xlab("Week") +
+  ylab("Average Bills EPA") +
+  labs(title = "**Bills Overall EPA Per Week**",
+       subtitle = "*2023 Regular Season*",
+       caption = "*Question 3*
+       **Jacob Larose**")
+```
+
+Question 4
+
+```{r}
+qb_epa_23 <- nflreadr::load_pbp(seasons = 2023) %>%
+  filter(season_type == "REG")%>%
+  filter(!is.na(passer_player_name))%>%
+  group_by(passer_player_name, posteam, passer_id)%>%
+  summarize(tot_qb_epa = sum(qb_epa, na.rm = T)) %>%
+  arrange(-tot_qb_epa)%>%
+  head(10)
+
+
+qb_epa_23 <- qb_epa_23%>%
+  left_join(teams_colors_logos, by = c("posteam" = "team_abbr"))
+
+qb_epa_23
+  
+```
+
+```{r}
+ggplot(data = qb_epa_23, aes(x = reorder(passer_id, -tot_qb_epa),
+                                     y = tot_qb_epa)) +
+  geom_col(fill = qb_epa_23$team_color,
+           color = qb_epa_23$team_color2) +
+  with_outer_glow(geom_text(aes(label = passer_player_name),
+                            position = position_stack(vjust = .98),
+                            angle = 90,
+                            hjust = .98,
+                            color = "white",
+                            family = "Roboto",
+                            fontface = "bold",
+                            size = 6),
+                  sigma = 6, expand = 1, color = "black") +
+  scale_y_continuous(breaks = scales::pretty_breaks(),
+                     expand = c(0,0)) +
+  theme(axis.text.x = nflplotR::element_nfl_headshot(size = 1))+
+  xlab("") +
+  ylab("QB EPA 2023") +
+  Jacob_theme() +
+  labs(title = "**QB Total EPA 2023**",
+       subtitle = "l",
+       caption = "*Quesion 4*
+       **Jacob Larose**")
+```
