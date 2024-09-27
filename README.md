@@ -1,1 +1,1 @@
-These are some coding projects I have worked on in my classes from scratch. Although limited in quantity, I believe these display an adaquete baseline of coding and analytics understanding.
+These are some coding projects I have worked on in my classes from scratch. I believe the "XGBoost League Winners" Quatro file from R is the most comprehensive display of my coding and analytics skills. Although limited in quantity, these files display an adequate baseline of coding and analytics understanding.
